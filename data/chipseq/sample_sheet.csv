@@ -1,0 +1,24 @@
+SampleName, Read, Read2, Description
+L12_PA56_rep1, C8CR7ACXX_l04n01_sb1.3510000005831b.fastq.gz, , L1-L2 stage animals with PA56 antibody against lin53 - replicate 1
+L12_PA56_rep2, C8CR7ACXX_l05n01_sb4.35100000057b4d.fastq.gz, , L1-L2 stage animals with PA56 antibody against lin53 - replicate 2
+L12_PA58_rep1, C8CR7ACXX_l05n01_sb2.35100000057a4e.fastq.gz, , L1-L2 stage animals with PA58 antibody against lin53 - replicate 1
+L12_PA58_rep2, C8CR7ACXX_l05n01_sb5.35100000057bb6.fastq.gz, , L1-L2 stage animals with PA58 antibody against lin53 - replicate 2
+CTRL_L12_1, C8CR7ACXX_l05n01_sb3.35100000057ac4.fastq.gz, , Control sample for samples L12_PA56_rep1 and L12_PA58_rep1
+CTRL_L12_2, C8CR7ACXX_l05n01_sb6.35100000057c3f.fastq.gz, , Control sample for samples L12_PA56_rep2 and L12_PA58_rep2
+L4_YA_rep1, LIN-53_N2_SB02_S1_L008_R1_001.fastq.gz, LIN-53_N2_SB02_S1_L008_R2_001.fastq.gz, L4 stage Young Adults (YA) with PA58 antibody against lin53 - WT background - replicate 1
+L4_YA_rep2, LIN-53_N2_SB09_S2_L008_R1_001.fastq.gz, LIN-53_N2_SB09_S2_L008_R2_001.fastq.gz, L4 stage Young Adults (YA) with PA58 antibody against lin53 - WT background - replicate 2
+CTRL_L4_YA_1, BT_SB_23_S1_L007_R1_001.fastq.gz, BT_SB_23_S1_L007_R2_001.fastq.gz, Control sample for L4_YA_rep1
+CTRL_L4_YA_2, BT_SB_46_S8_L007_R1_001.fastq.gz, BT_SB_46_S8_L007_R2_001.fastq.gz, Control sample for L4_YA_rep2
+L4_YA_glp4_rep1, LIN-53_glp_4_SB10_S3_L008_R1_001.fastq.gz, LIN-53_glp_4_SB10_S3_L008_R2_001.fastq.gz, L4/young adult stage animals with PA58 antibody against lin53 - in glp-4 mutant backround, no germ cell - replicate 1
+L4_YA_glp4_rep2, LIN-53_glp-4_SB11_S5_L008_R1_001.fastq.gz, LIN-53_glp-4_SB11_S5_L008_R2_001.fastq.gz, L4/young adult stage animals with PA58 antibody against lin53 - in glp-4 mutant backround, no germ cell - replicate 2
+CTRL_L4_YA_glp4_1, INPUT_glp-4_SB10_S4_L008_R1_001.fastq.gz, INPUT_glp-4_SB10_S4_L008_R2_001.fastq.gz, Control sample for L4_YA_glp4_rep1
+CTRL_L4_YA_glp4_2, INPUT_glp-4_SB11_S6_L008_R1_001.fastq.gz, INPUT_glp-4_SB11_S6_L008_R2_001.fastq.gz, Control sample for L4_YA_glp4_rep2 
+L4_5d_glp4_rep1, BT_SB_74_S1_R1_001.fastq.gz, BT_SB_74_S1_R2_001.fastq.gz, L4 stage 5 day-old adults in glp4 mutant background with PA58 antibody against lin53 - replicate 1
+L4_5d_glp4_rep2, BT_SB_75_S2_R1_001.fastq.gz, BT_SB_75_S2_R2_001.fastq.gz, L4 stage 5 day-old adults in glp4 mutant background with PA58 antibody against lin53 - replicate 2
+CTRL_L4_5d_glp4_1, BT_SB_80_S5_R1_001.fastq.gz, BT_SB_80_S5_R2_001.fastq.gz, Control sample for L4_5d_glp4_rep1
+CTRL_L4_5d_glp4_2, BT_SB_81_S6_R1_001.fastq.gz, BT_SB_81_S6_R2_001.fastq.gz, Control sample for L4_5d_glp4_rep2
+L4_YA_GFP_rep1, GFP_N2_SB09_S9_L008_R1_001.fastq.gz, GFP_N2_SB09_S9_L008_R2_001.fastq.gz, negative control, so ChIP with GFP antibody in wildtype background, which do not have GFP tagged protein
+L4_YA_GFP_rep2, GFP_N2_WC_SB_01_S10_L008_R1_001.fastq.gz, GFP_N2_WC_SB_01_S10_L008_R2_001.fastq.gz, negative control, so ChIP with GFP antibody in wildtype background, which do not have GFP tagged protein
+CTRL_L4_YA_GFP_1, BT_SB_46_S8_L007_R1_001.fastq.gz, BT_SB_46_S8_L007_R2_001.fastq.gz, Control sample for L4_YA_GFP_rep1
+CTRL_L4_YA_GFP_2, BT_SB_61_S11_L007_R1_001.fastq.gz, BT_SB_61_S11_L007_R2_001.fastq.gz, Control sample for L4_YA_GFP_rep2
+

@@ -1,0 +1,31 @@
+locations:
+  reads-dir: /data/local/buyar/collaborations/steffi/data/reads/rnaseq
+  output-dir: /data/local/buyar/collaborations/steffi/results/rnaseq
+  genome-fasta: /data/local/buyar/collaborations/steffi/data/fasta/Caenorhabditis_elegans.WBcel235.dna.toplevel.fa #ce11, ensembl89
+  cdna-fasta: /data/local/buyar/collaborations/steffi/data/fasta/Caenorhabditis_elegans.WBcel235.cdna.all.fa #ce11, ensembl89
+  gtf-file: /data/local/buyar/collaborations/steffi/data/gtf/Caenorhabditis_elegans.WBcel235.89.gtf #ce11, ensembl v89
+
+organism: celegans
+
+DEanalyses:
+  
+  lin_n3368:
+    case_sample_groups: "lin_n3368"
+    control_sample_groups: "WT"
+    covariates: ""
+
+  lin_CRISPR: 
+    case_sample_groups: "lin_CRISPR"
+    control_sample_groups: "WT"
+    covariates: ""
+
+  sin3:
+    case_sample_groups: "sin3"
+    control_sample_groups: "WT"
+    covariates: "" 
+
+  let418:
+    case_sample_groups: "let418"
+    control_sample_groups: "WT"
+    covariates: ""
+    

@@ -1,0 +1,17 @@
+name,reads,reads2,sample_type,comparison_factor,batch,other1,other2
+WT_N2_L4a,BT_SS_003_ACAGTG_L007_R1_001.fastq.gz,,WT,1,Batch1,BT_SS_003,N2_L4
+WT_N2_L4b,BT_SS_004_GCCAAT_L007_R1_001.fastq.gz,,WT,1,Batch1,BT_SS_004,N2_L4
+WT_N2_L4c,BT_SS_029_CGATGT_L007_R1_001.fastq.gz,,WT,1,Batch2,BT_SS_029,WT_N2_L4
+WT_N2_L4d,BT_SS_030_TGACCA_L008_R1_001.fastq.gz,,WT,1,Batch2,BT_SS_030,_WT__N2_L4
+lin_n833_L4a,BT_SS_007_AGTCAA_L007_R1_001.fastq.gz,,lin_n833,1,Batch1,BT_SS_007,lin-53_(n833)_L4
+lin_n833_L4b,BT_SS_008_AGTTCC_L007_R1_001.fastq.gz,,lin_n833,1,Batch1,BT_SS_008,lin-53_(n833)_L4
+lin_n3368_L4a,BT_SS_011_GTCCGC_L008_R1_001.fastq.gz,,lin_n3368,1,Batch1,BT_SS_011,lin-53_(n3368)_L4
+lin_n3368_L4b,BT_SS_012_GTGAAA_L008_R1_001.fastq.gz,,lin_n3368,1,Batch1,BT_SS_012,lin-53_(n3368)_L4
+lin_n3368_L4c,BT_SS_031_ACAGTG_L008_R1_001.fastq.gz,,lin_n3368,1,Batch2,BT_SS_031,lin-53(n3368)_L4
+lin_n3368_L4d,BT_SS_032_GCCAAT_L008_R1_001.fastq.gz,,lin_n3368,1,Batch2,BT_SS_032,lin-53(n3368)_L4
+lin_CRISPR_L4a,BT_SS_033_CAGATC_L008_R1_001.fastq.gz,,lin_CRISPR,1,Batch2,BT_SS_033,lin-53_CRISPR_L4
+lin_CRISPR_L4b,BT_SS_034_CTTGTA_L008_R1_001.fastq.gz,,lin_CRISPR,1,Batch2,BT_SS_034,lin-53_CRISPR_L4
+let418_L4a,BT_SS_027_GTCCGC_L007_R1_001.fastq.gz,,let418,1,Batch2,BT_SS_027,let-418(n3536)_L4
+let418_L4b,BT_SS_028_GTGAAA_L007_R1_001.fastq.gz,,let418,1,Batch2,BT_SS_028,let-418(n3536)_L4
+sin-3_tm1276_25Ca,sin-3_tm1276_25C_S11_R1_001.fastq.gz,,sin3,1,Batch3,BT_SS_051,sin-3(tm1276)_25C
+sin-3_tm1276_25Cb,sin-3_tm1276_25C_S12_R1_001.fastq.gz,,sin3,1,Batch3,BT_SS_052,sin-3(tm1276)_25C

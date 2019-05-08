@@ -1,0 +1,989 @@
+---
+title: "RNA-seq Figures for Manuscript by Muthel et al"
+author: "Bora Uyar"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    code_folding: hide
+    theme: united
+    toc: yes
+    toc_float: yes
+params:
+  workdir: '.'
+  FDR_cutoff: 0.05
+  log2FC_cutoff: 0.5
+---
+
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = params$workdir)
+
+FDR_cutoff <- params$FDR_cutoff
+log2FC_cutoff <- params$log2FC_cutoff
+
+outdir <- file.path(params$workdir, paste0('figures-tables.',gsub(" ", '_', gsub(":", ".", Sys.time())))) #output folder for figures/tables to go into the manuscript
+rnaseqResultsFolder <- './data/rnaseq' #params$rnaseqResultsFolder
+chipseqResultsFolder <- './data/chipseq' #params$chipseqResultsFolder
+
+#read gtf file 
+gtfData <- readRDS('./data/Caenorhabditis_elegans.WBcel235.89.gtf.granges.rds')
+  
+countsFile <- file.path(rnaseqResultsFolder, 'counts_from_SALMON.genes.tsv')
+
+#create folder where figures/tables will be written in pdf/tsv formats
+if(!dir.exists(outdir)) {
+  dir.create(path = outdir)
+} else {
+  stop("Folder already exists at:",outdir,"\n")
+}
+suppressMessages(suppressWarnings(library(RUVSeq)))
+suppressMessages(suppressWarnings(library(DESeq2)))
+suppressMessages(suppressWarnings(library(edgeR)))
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(ggrepel)))
+suppressMessages(suppressWarnings(library(ggfortify)))
+suppressMessages(suppressWarnings(library(VennDiagram)))
+suppressMessages(suppressWarnings(library(gProfileR)))
+suppressMessages(suppressWarnings(library(UpSetR)))
+suppressMessages(suppressWarnings(library(DT)))
+suppressMessages(suppressWarnings(library(reshape2)))
+suppressMessages(suppressWarnings(library(GenomicRanges)))
+suppressMessages(suppressWarnings(library(data.table)))
+suppressMessages(suppressWarnings(library(GenomicFeatures)))
+suppressMessages(suppressWarnings(library(scales)))
+suppressMessages(suppressWarnings(library(corrplot)))
+```
+
+Let's import the normalized count tables for genes from salmon based counts
+```{r}
+sampleSheetFile <- file.path(rnaseqResultsFolder, 'sample_sheet.csv')
+sampleSheet <- read.table(sampleSheetFile, sep = ',', header = T, row.names = 'name')
+#list of sample groups of interest
+sampleGroups <- c('lin_CRISPR', 'lin_n3368', 'sin3', 'let418', 'WT')
+#list of analysed sample ids
+sampleIDs <- rownames(sampleSheet[sampleSheet$sample_type %in% sampleGroups,])
+
+countData <- as.matrix(read.table(countsFile, header = T, sep = '\t', row.names = 1, check.names = FALSE))
+countData <- countData[,colnames(countData) %in% sampleIDs]
+
+colData <- sampleSheet[colnames(countData),c('sample_type','batch')]
+```
+
+Map gene ids in count data to gene names 
+```{r}
+mapIdsToNames <- function(ids, gtfData) {
+  #first figure out if the given ids are transcript or gene ids
+  transcripts <- gtfData[gtfData$type == 'transcript']
+  df <- unique(data.frame('transcript_id' = transcripts$transcript_id, 
+                   'gene_id' = transcripts$gene_id, 
+                   'gene_name' = transcripts$gene_name, stringsAsFactors = FALSE))
+  m <- apply(head(df[,1:2], 1000), 2, function(x) sum(x %in% ids))
+  #then map the ids to gene names
+  if(m['transcript_id'] > m['gene_id']){
+    return(df[match(ids, df$transcript_id),]$gene_name)
+  } else {
+    return(df[match(ids, df$gene_id),]$gene_name)
+  }
+}
+
+#map gene ids to gene names in countData 
+geneNames <- mapIdsToNames(rownames(countData), gtfData)
+#use original ids when it is not mappable to gene names
+geneNames[which(is.na(geneNames))] <- rownames(countData)[which(is.na(geneNames))]
+rownames(countData) <- toupper(geneNames) 
+```
+
+# Diagnostics 
+
+Here I define some functions to do diagnostic plots 
+```{r}
+plotHeatmap <- function(M, annoDf, top = 500, title = NULL, scaleBy = 'row', showRownames = FALSE, ...) {
+  selected <- names(sort(apply(M, 1, var), decreasing = T))[1:top]
+  pheatmap::pheatmap(M[selected,], annotation_col = annoDf, 
+                     scale = scaleBy, show_rownames = showRownames, 
+                     main = title, 
+                     ...)
+} 
+
+plotCorr <- function(M, title = NULL, annoDf, cutTree = 1, plotType = 'corrplot', ...) {
+  if(plotType == 'corrplot') {
+    corrplot::corrplot(stats::cor(M), title = title, order = 'hclust', addrect = cutTree)
+  } else if (plotType == 'heatmap') {
+    pheatmap::pheatmap(stats::cor(M), main = title, annotation_col = annoDf, cutree_cols = cutTree, ...)
+  }
+}
+
+getVennPlot <- function(myList, category, fill = c('blue', 'red')) {
+  overlap <- VennDiagram::calculate.overlap(myList)
+  vennPlot <- draw.pairwise.venn(area1 = length(overlap[[1]]),
+                     area2 = length(overlap[[2]]),
+                     cross.area = length(overlap[[3]]),
+                     category = category,
+                     fill = fill,
+                     cex = 2.5,
+                     cat.pos = c(330, 30), cat.default.pos = 'outer', alpha = 0.5)
+  return(vennPlot)
+}
+
+importIDRpeaks <- function(filePath) {
+  gr <- GenomicRanges::makeGRangesFromDataFrame(
+    df = data.table::fread(file = filePath, 
+                           select = c(1:6), 
+                           col.names = c('seqname', 'start', 'end', 'name', 'score', 'strand')), 
+    keep.extra.columns = TRUE)
+  return(gr)
+}
+
+importNarrowPeaks <- function(filePath) {
+  extraCols_narrowPeak <- c(signalValue = "numeric", pValue = "numeric",
+                        qValue = "numeric", peak = "integer")
+  peaks <- rtracklayer::import.bed(filePath, extraCols = extraCols_narrowPeak)
+  return(peaks)
+}
+```
+
+
+## On normalized data
+
+### deseq normalization {.tabset}
+
+#### RLE
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = countData, colData = colData, design = ~ sample_type)
+dds <- dds[rowSums(counts(dds)) > 1,]
+dds <- DESeq(dds)
+plotRLE(counts(dds, normalized = TRUE), outline=FALSE, ylim=c(-4, 4), col=colData$sample_type, main = 'DESeq normalized')
+```
+
+#### PCA
+```{r}
+plotPCA(counts(dds, normalized = TRUE), col=as.numeric(colData$sample_type), cex=1.2, main = 'DESeq normalized')
+```
+
+#### Heatmap
+```{r}
+plotHeatmap(M = counts(dds, normalized = TRUE), annoDf = colData, title = 'DESeq normalized', cutree_cols = length(sampleGroups))
+```
+
+We see some batch effects. Some replicates don't cluster well. For instance, WT samples from batch-2 (replicates c and d) cluster with let418 samples from batch-2 rather than the other WT replicates. 
+
+## Removing unwanted variation 
+
+Let's remove unwanted variation such as batch effects, library preparation etc. 
+
+### Using RUVs {.tabset}
+
+#### RLE
+```{r}
+# create an expression set object
+set <- EDASeq::newSeqExpressionSet(counts = countData,
+                           phenoData = colData)
+# remove uninformative features
+idx  <- rowSums(counts(set) > 5) >= 2
+set  <- set[idx, ]
+
+differences <- makeGroups(colData$sample_type)
+## looking for three different sources of unwanted variation (k = 3)
+set_s <- RUVs(set, unique(rownames(set)), k=3, differences) #all genes
+
+plotRLE(set_s, outline=FALSE, ylim=c(-4, 4), col=colData$sample_type, main = 'After processing with RUVs')
+```
+
+#### PCA
+```{r}
+plotPCA(set_s, col=as.numeric(colData$sample_type), cex=1.2, main = 'After processing with RUVs')
+```
+
+#### Heatmap
+```{r}
+plotHeatmap(M = log2(normCounts(set_s)+1), annoDf = colData, title = 'After processing with RUVs', cutree_cols = 4)
+```
+
+### Corrplot
+```{r}
+plotCorr(M = log2(normCounts(set_s)+1), title = 'After processing with RUVs', annoDf = colData, cutTree = 4, 
+        plotType = 'heatmap')
+```
+
+# Differential Expression Analysis on cleaned up data 
+Now that we have learned the sources of unwanted variation, we can integrate this into the differential expression analysis for the GLM fit. We will use RUVs output as it performs better in removing the batch effects (see the diagnostic plots above). 
+
+We are testing against the null hypothesis the genes in the mutant samples have an absolute log2 fold change of less than 0.5 compared to WT sample, with a false-discovery rate of 0.05. 
+
+```{r deseq_round2}
+colData <- cbind(colData, data.frame('W1' = set_s$W_1[match(rownames(colData), rownames(pData(set_s)))], 
+                                     'W2' = set_s$W_2[match(rownames(colData), rownames(pData(set_s)))],
+                                     'W3' = set_s$W_3[match(rownames(colData), rownames(pData(set_s)))]))
+dds <- DESeqDataSetFromMatrix(countData, colData, ~ W1 + W2 + sample_type)
+dds <- DESeq(dds)
+
+
+DE <- lapply(sampleGroups[which(sampleGroups != 'WT')], function(s) {
+  res <- as.data.frame(DESeq2::results(object = dds, 
+                                       contrast = c('sample_type', s, 'WT'), 
+                                       lfcThreshold = log2FC_cutoff, 
+                                       alpha = FDR_cutoff))
+})
+names(DE) <- sampleGroups[which(sampleGroups != 'WT')]
+
+# given a DESeq2 results table, classify each gene as unchanged or up/down regulated 
+getDifferentialExpressionStatus <- function(de, fdr_thr, log2fc_thr) {
+  de <- data.table::as.data.table(de, keep.rownames=T)
+  de$status <- 'unchanged'
+  de[padj <= fdr_thr & log2FoldChange > log2fc_thr,]$status <- 'upregulated'
+  de[padj <= fdr_thr & log2FoldChange < -1 * log2fc_thr]$status <- 'downregulated'
+  return(de)
+}
+
+#get differential expression status of genes from differential expression tables 
+# for how `DE` was obtained, see section `DESeq2 on cleaned up data` (DESeq2 round2)
+DEtables <- lapply(DE, function(de) {
+  getDifferentialExpressionStatus(de = de, fdr_thr = FDR_cutoff, log2fc_thr = log2FC_cutoff)
+})
+names(DEtables) <- names(DE)
+
+# get lists of differentially expressed genes 
+DEgenes <- lapply(DEtables, function(de) de[status != 'unchanged']$rn)
+
+```
+
+# Manuscript Figures 
+
+From here on, we can start making the actual figures for the manuscript using DESeq2 output from the section above. 
+
+Let's define some functions for downstream analysis
+
+```{r}
+getGeneSetExpr <- function(M, geneSetFile) {
+  genes <- readLines(geneSetFile)
+  #convert to latest ENSG gene ids
+  genes <- unique(gProfileR::gconvert(genes, 'celegans', 'ENSG')$name)
+  return(M[intersect(genes, rownames(M)),])
+}
+
+runGprofiler <- function(genes, 
+                         organism = 'celegans',
+                         src_filter = c('GO', 'REAC', 'KEGG'), 
+                         hier_filtering = 'none',
+                         ...) {
+  res <- data.table::data.table(gProfileR::gprofiler(query = genes, organism = organism, 
+                              src_filter = src_filter, 
+                              hier_filtering = hier_filtering, ...))
+  res <- res[order(p.value), ]
+  return(res)
+}
+
+plotGeneExpression <- function(gene, countMatrix, colData) {
+  df <- as.data.frame(log2(countMatrix[gene,]+1))
+  colnames(df) <- 'gene'
+  df <- merge(df, colData, by = 'row.names')
+  mdf <- reshape2::melt(df, measure.vars = 'gene')
+  ggplot(mdf, aes(x = sample_type, y = value, group = sample_type)) + 
+    geom_line(aes(color = sample_type), show.legend = F) + 
+    geom_point(aes(color = sample_type), size = 4, show.legend = F) + 
+    labs(x = '', y = 'log2(expression)')
+}
+
+plotGeneDE <- function(gene, DE, fdr_thr) {
+  df <- as.data.frame(t(sapply(DE, function(x) x[gene, c('padj', 'log2FoldChange')])))
+  df$sample <- rownames(df)
+  df$padj <- as.numeric(df$padj)
+  df$log2FoldChange <- as.numeric(df$log2FoldChange)
+  ggplot2::ggplot(df, aes(x = sample, y = log2FoldChange)) + 
+    geom_bar(aes(fill = ifelse(padj < 0.1, 'dodgerblue', 'orangered2')), stat = 'identity', show.legend = FALSE) + 
+    geom_text(aes(label = ifelse(padj < fdr_thr, 
+                                 gtools::stars.pval(padj), 
+                                 paste0('p=',round(padj, 3)))))
+}
+
+extend <- function(x, upstream=0, downstream=0)     
+{
+    if (any(strand(x) == "*"))
+        warning("'*' ranges were treated as '+'")
+    on_plus <- strand(x) == "+" | strand(x) == "*"
+    new_start <- start(x) - ifelse(on_plus, upstream, downstream)
+    new_end <- end(x) + ifelse(on_plus, downstream, upstream)
+    ranges(x) <- IRanges(new_start, new_end)
+    trim(x)
+}
+
+
+```
+
+## Main findings from the paper
+
+First, define the expression data that will be used for the figures. 
+
+```{r}
+#expression data to be used for downstream analysis 
+# we use normalized counts cleaned up for unwanted variation using RUVs 
+expr <- normCounts(set_s)
+```
+
+### GO-term Enrichment Analysis 
+
+#### lin_CRISPR {.tabset .tabset-pills}
+
+##### Differentially expressed genes
+
+```{r}
+go_lin_CRISPR <- runGprofiler(genes = DEtables$lin_CRISPR[status != 'unchanged']$rn)
+DT::datatable(go_lin_CRISPR[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Up-regulated  
+```{r}
+go_lin_CRISPR_up <- runGprofiler(genes = DEtables$lin_CRISPR[status == 'upregulated']$rn)
+DT::datatable(go_lin_CRISPR_up[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Down-regulated  
+```{r}
+go_lin_CRISPR_down <- runGprofiler(genes = DEtables$lin_CRISPR[status == 'downregulated']$rn)
+DT::datatable(go_lin_CRISPR_down[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+#### lin_n3368 {.tabset .tabset-pills}
+
+##### Differentially expressed genes
+
+```{r}
+go_lin_n3368 <- runGprofiler(genes = DEtables$lin_n3368[status != 'unchanged']$rn)
+DT::datatable(go_lin_n3368[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Up-regulated
+
+```{r}
+go_lin_n3368_up <- runGprofiler(genes = DEtables$lin_n3368[status == 'upregulated']$rn)
+DT::datatable(go_lin_n3368_up[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Down-regulated
+
+```{r}
+go_lin_n3368_down <- runGprofiler(genes = DEtables$lin_n3368[status == 'downregulated']$rn)
+DT::datatable(go_lin_n3368_down[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+#### sin-3 {.tabset .tabset-pills}
+
+##### Differentially expressed genes
+
+```{r}
+go_sin3 <- runGprofiler(DEtables$sin3[status != 'unchanged']$rn)
+DT::datatable(go_sin3[, c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Up-regulated
+
+```{r}
+go_sin3_up <- runGprofiler(DEtables$sin3[status == 'upregulated']$rn)
+DT::datatable(go_sin3_up[, c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Down-regulated
+
+```{r}
+go_sin3_down <- runGprofiler(DEtables$sin3[status == 'downregulated']$rn)
+DT::datatable(go_sin3_down[, c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+
+#### let-418 {.tabset .tabset-pills}
+
+##### Differentially expressed genes
+
+```{r}
+go_let418 <- runGprofiler(DEtables$let418[status != 'unchanged']$rn)
+DT::datatable(go_let418[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Up-regulated
+
+```{r}
+go_let418_up <- runGprofiler(DEtables$let418[status == 'upregulated']$rn)
+DT::datatable(go_let418_up[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+##### Down-regulated
+```{r}
+go_let418_down <- runGprofiler(DEtables$let418[status == 'downregulated']$rn)
+DT::datatable(go_let418_down[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+
+### Heatmap of top variable genes lin versus WT
+
+```{r}
+M <- subset(expr, 
+            select = c(rownames(colData[colData$sample_type %in% c('WT', 'lin_n3368', 'lin_CRISPR'),])))
+plotHeatmap(log2(M+1), top = 500, annoDf = colData[,c('batch', 'sample_type')], 
+            title = 'Top 500 most variable genes in lin-53 mutants versus WT', 
+            scaleBy = 'row', showRownames = FALSE, cutree_cols = 2) 
+#print to file
+plotHeatmap(log2(M+1), top = 500, annoDf = colData[,c('batch', 'sample_type')], 
+            title = 'Top 500 most variable genes in lin-53 mutants versus WT', 
+            scaleBy = 'row', showRownames = FALSE, cutree_cols = 2, 
+            filename = file.path(outdir, "heatmap.topvariablegenes.lin53_vs_WT.pdf")) 
+```
+
+### Correlation of lin53 and sin3 mutants
+```{r}
+M <- subset(expr, 
+            select = c(rownames(colData[colData$sample_type %in% c('WT', 'lin_n3368', 'sin3'),])))
+plotCorr(log2(M+1), title = 'Correlation of lin-53 and sin-3 mutants with WT samples', 
+         annoDf = colData[,c('batch', 'sample_type')], 
+         scaleBy = 'row', showRownames = FALSE, cutTree = 2, plotType = 'heatmap')
+
+#print to file
+plotCorr(log2(M+1), title = 'Correlation of lin-53 and sin-3 mutants with WT samples', 
+         annoDf = colData[,c('batch', 'sample_type')], 
+         scaleBy = 'row', showRownames = FALSE, cutTree = 2, plotType = 'heatmap',
+         filename = file.path(outdir, "heatmap.lin53_vs_sin3.pdf"))
+```
+
+## Overlap of differentially expressed genes {.tabset}
+
+Using WT as the reference, we have differential expression results for each mutant group of samples. Now, we'd like to see the amount of overlap between pairs of mutants. 
+
+### all versus all 
+```{r}
+UpSetR::upset(data = fromList(DEgenes), order.by = 'freq')
+
+pdf(file = file.path(outdir, "upsetR.all_vs_all.pdf"))
+UpSetR::upset(data = fromList(DEgenes), order.by = 'freq')
+invisible(dev.off())
+
+```
+
+
+### lin_n3368 vs lin_CRISPR 
+```{r}
+invisible(getVennPlot(myList = list(DEgenes$lin_CRISPR, DEgenes$lin_n3368), 
+            category = c('lin_CRISPR', 'lin_n3368')))
+
+pdf(file = file.path(outdir, "venn.linCRISPR_lin3368.pdf"))
+invisible(getVennPlot(myList = list(DEgenes$lin_CRISPR, DEgenes$lin_n3368), 
+            category = c('lin_CRISPR', 'lin_n3368')))
+invisible(dev.off())
+```
+
+### lin_n3368 vs sin3
+```{r}
+invisible(getVennPlot(myList = list(DEgenes$lin_n3368, DEgenes$sin3), 
+            category = c('lin_n3368', 'sin3')))
+
+pdf(file = file.path(outdir, "venn.lin3368_sin3.pdf"))
+invisible(getVennPlot(myList = list(DEgenes$lin_n3368, DEgenes$sin3), 
+            category = c('lin_n3368', 'sin3')))
+invisible(dev.off())
+```
+
+### lin_CRISPR vs sin3
+```{r}
+invisible(getVennPlot(myList = list(DEgenes$lin_CRISPR, DEgenes$sin3), 
+            category = c('lin_CRISPR', 'sin3')))
+
+pdf(file = file.path(outdir, "venn.linCRISPR_sin3.pdf"))
+invisible(getVennPlot(myList = list(DEgenes$lin_CRISPR, DEgenes$sin3), 
+            category = c('lin_CRISPR', 'sin3')))
+invisible(dev.off())
+```
+
+### lin_n3368 vs let418
+```{r}
+invisible(getVennPlot(myList = list(DEgenes$lin_n3368, DEgenes$let418), 
+            category = c('lin_n3368', 'let418')))
+pdf(file = file.path(outdir, "venn.lin3368_let418.pdf"))
+invisible(getVennPlot(myList = list(DEgenes$lin_n3368, DEgenes$let418), 
+            category = c('lin_n3368', 'let418')))
+invisible(dev.off())
+```
+
+### lin_CRISPR vs let418
+```{r}
+invisible(getVennPlot(myList = list(DEgenes$lin_CRISPR, DEgenes$let418), 
+            category = c('lin_CRISPR', 'let418')))
+pdf(file = file.path(outdir, "venn.linCRISPR_let418.pdf"))
+invisible(getVennPlot(myList = list(DEgenes$lin_CRISPR, DEgenes$let418), 
+            category = c('lin_CRISPR', 'let418')))
+invisible(dev.off())
+
+```
+
+
+## Expression levels of genes of interest {.tabset}
+
+Let's have a look at the expression levels of certain genes of interest
+that are mentioned in the text 
+
+```{r}
+genes <- c('HLH-1', 'MYO-3', #muscle
+           'AGE-1', 'DAF-2', 'DAF-16', 'PDK-1', #lifespan
+           'HSP-43', 'SIP-1', 'HSP-60', 'HSP-70', #lifespan 
+           'TPS-1', 'TPS-2', 'TRE-1', 'TRE-2', #lifespan trehalose related
+           'UNC-52', 'UNC-120', 'UNC-54', 'TNT-2', 'TNT-4', #muscle related
+           'ICL-1')
+
+genePlots <- lapply(genes, function(g) {
+  plotGeneExpression(g, expr, colData)
+})
+names(genePlots) <- genes
+
+pdf(file = file.path(outdir, "genes_of_interest.expression_levels.pdf"))
+for(i in 1:length(genePlots)) {
+  g <- names(genePlots)[i]
+  p <- genePlots[[g]] + labs(title = g)
+  print(p)
+}
+invisible(dev.off())
+```
+
+```{r, results='asis', echo = FALSE}
+for (i in 1:length(genePlots)) {
+  cat("### ",names(genePlots)[i],"\n")
+  print(genePlots[[i]])
+  cat('\n\n')
+}
+```
+
+## Differential expression of genes of interest
+
+### Volcano plots {.tabset}
+```{r}
+# de: data.frame deseq2 results table
+# genes: optional (color and label a list of genes on the volcano plot)
+plotVolcano <- function(de, genes = NULL) {
+
+  # remove points with NA padj values
+  de <- de[!is.na(padj)]
+    
+  p <- ggplot2::ggplot(de, aes(y = -log10(padj), x = log2FoldChange, 
+                               color = padj < FDR_cutoff)) + 
+    geom_point(alpha = 0.3) 
+  
+  if(!is.null(genes)) {
+    p <- p + ggrepel::geom_text_repel(data = de[match(genes, rn)], 
+                                aes(x = log2FoldChange,
+                                    y = -log10(padj), 
+                                    label = rn), color = 'black', size = 3)
+  }
+  #print(p)
+  return(p)
+}
+
+plots <- lapply(DEtables, function(de) {
+  plotVolcano(de, genes)
+})
+
+pdf(file = file.path(outdir, "genes_of_interest.volcano_plots.pdf"))
+for(i in 1:length(plots)) {
+  g <- names(plots)[i]
+  p <- plots[[g]] + labs(title = g)
+  print(p)
+}
+invisible(dev.off())
+```
+
+```{r, results='asis', echo = FALSE}
+for (i in 1:length(plots)) {
+  cat("#### ",names(plots)[i],"\n")
+  print(plots[[i]])
+  cat('\n\n')
+}
+```
+
+### Barplots {.tabset}
+```{r}
+plots <- lapply(genes, function(g) {
+  plotGeneDE(g, DE, fdr_thr = FDR_cutoff)
+})
+names(plots) <- genes
+
+pdf(file = file.path(outdir, "genes_of_interest.diff_exp.barplots.pdf"))
+for(i in 1:length(plots)) {
+  g <- names(plots)[i]
+  p <- plots[[g]] + labs(title = g)
+  print(p)
+}
+invisible(dev.off())
+
+```
+
+```{r, results='asis', echo = FALSE}
+for (i in 1:length(plots)) {
+  cat("#### ",names(plots)[i],"\n")
+  print(plots[[i]])
+  cat('\n\n')
+}
+```
+
+# Chip-seq 
+```{r import_peaks}
+
+#import IDR peaks
+peakFilesIDR <- dir(path = file.path(chipseqResultsFolder, 'Peaks', 'IDR'), 
+                 pattern = '.bed$',  
+                 recursive = T, full.names = T)
+peaksIDR <- lapply(peakFilesIDR, function(f) importIDRpeaks(f))
+names(peaksIDR) <- gsub('.bed', '_IDR', basename(peakFilesIDR))
+peaksIDR <- GenomicRanges::GRangesList(peaksIDR)
+```
+
+## Does LIN-53 bind to certain loci? {.tabset}
+
+Define the set of genes for which we want to find out if there are any ChIP peaks for lin-53 discovered around them. Some genes are positive controls for which we know from the browser that there is at least one IDR peak near the promoters (e.g. rad50, hel-1)
+
+```{r}
+chipTargetGenes <-  c('icl-1', 'hlh-1', 'myo-3', 'tps-1', 'tps-2', 'daf-2', 'daf-16', 'hel-1') #rad-50, hel-1 are positive controls for L4_YA peaks
+chipTargetGenes.gr <- gtfData[which(gtfData$type == 'gene' & gtfData$gene_name %in% chipTargetGenes),]
+
+# define function for plotting overlaps of peaks with genes 
+plotOverlaps <- function(peaks, targets, title) {
+  df <- as.data.frame(sapply(peaks, function(x) overlapsAny(targets, x)))
+  df$gene <- targets$gene_name
+  mdf <- melt(df, id.vars = 'gene')
+  colnames(mdf)[3] <- 'overlaps_any_peak'
+  mdf$peakType <- 'MACS'
+  mdf[grepl('IDR', mdf$variable),]$peakType <- 'IDR'
+  mdf$group <- as.factor(gsub('\\_(IDR|rep).?$', '', mdf$variable))
+  
+  ggplot(mdf, aes( x = gene, y = reorder(variable, as.numeric(group)))) + 
+    geom_tile(alpha = ifelse(as.numeric(mdf$group)%%2 == 0, 0.1, 0), show.legend = FALSE) + 
+    geom_point(aes(color = overlaps_any_peak), size = 5) + 
+    labs(y = '', x = '', title = title) #+ 
+}
+```
+
+### Overlap with gene bodies 
+
+```{r}
+p <- plotOverlaps(peaksIDR, chipTargetGenes.gr, title = 'LIN-53 peak overlaps with **genes**')  
+print(p)
+pdf(file = file.path(outdir, "chip_peaks.overlap_with_gene_bodies.pdf"))
+print(p)
+invisible(dev.off())
+```
+
+### Overlap with promoters (500 bp upstream)
+```{r}
+chipTargetGenes.promoters <- GenomicFeatures::promoters(x = chipTargetGenes.gr, upstream = 500, downstream = 0)
+p <- plotOverlaps(peaksIDR, chipTargetGenes.promoters, title = 'LIN-53 peak overlaps with **promoters**')  
+print(p)
+
+pdf(file = file.path(outdir, "chip_peaks.overlap_with_promoters.pdf"))
+print(p)
+invisible(dev.off())
+```
+
+### Overlap with promoters or gene bodies
+```{r}
+
+p <- plotOverlaps(peaksIDR, targets = extend(chipTargetGenes.gr, upstream = 500, downstream = 0), 
+             title = 'LIN-53 peak overlaps with **promoters OR genes**')  
+
+print(p)
+pdf(file = file.path(outdir, "chip_peaks.overlap_with_promoters_or_genebodies.pdf"))
+print(p)
+invisible(dev.off())
+
+```
+
+
+
+## Comparison of peaks by overlapping genes {.tabset}
+```{r}
+geneCoords <- gtfData[which(gtfData$type == 'gene'),]
+
+M <- sapply(peaksIDR, function(x) overlapsAny(geneCoords, x))
+M <- M * 1
+rownames(M) <- geneCoords$gene_name
+
+anno <- data.frame(row.names = colnames(M), 
+                   'group' = gsub('\\_(IDR|rep).?$', '', colnames(M)))
+
+```
+
+### IDR peaks
+```{r}
+plotCorr(M = stats::cor(M[,grep('IDR', colnames(M))]), annoDf = anno, 
+         title = 'Correlation of IDR peaks by overlaps with genes', 
+         plotType = 'heatmap'
+         )
+#print to file
+plotCorr(M = stats::cor(M[,grep('IDR', colnames(M))]), annoDf = anno, 
+         title = 'Correlation of IDR peaks by overlaps with genes', 
+         plotType = 'heatmap', 
+         filename = file.path(outdir, "chip_peaks.compare_samples.IDR.pdf"))
+
+```
+
+# Chip-seq versus RNA-seq 
+
+```{r}
+plotGeneSetHeatmap <- function(geneSetFile, expr, colData, sample_types, plotTitle, outdir, ...) {
+  
+  M <- subset(getGeneSetExpr(expr, geneSetFile), 
+              select = c(rownames(colData[colData$sample_type %in% sample_types,])))
+
+  #remove genes with sd = 0 
+  M <- M[names(which(apply(M, 1, sd) != 0)),]
+  
+  # #print to file
+  outfile <- file.path(outdir, paste0('geneSets.heatmap.',
+                                                  gsub(" ", "_", plotTitle),
+                                                  '.pdf'))
+  plotHeatmap(M = log2(M+1),
+              top = nrow(M),
+              annoDf = colData[,c('batch', 'sample_type')],
+              showRownames = TRUE,
+              title = plotTitle, cutree_cols = 2,
+              filename = outfile, ...)
+  return(outfile)
+}
+```
+
+```{r}
+geneCoords <- gtfData[which(gtfData$type == 'gene'),]
+
+#find out which chip samples have peaks that overlap with which genes and/or their promoters
+peak2geneMatrix <- sapply(X = peaksIDR, 
+                          FUN = function(x) {
+                            overlapsAny(promoters(geneCoords, upstream = 500), x)
+                            })
+peak2geneMatrix <- peak2geneMatrix * 1
+rownames(peak2geneMatrix) <- toupper(ifelse(is.na(geneCoords$gene_name), geneCoords$gene_id, geneCoords$gene_name))
+```
+
+For each selected lin53 chip sample, loop through each rna-seq sample and classify genes whether 
+they are targeted by lin53 or not
+```{r}
+
+chipSamples <- c('L12_PA58_IDR', 'L4_YA_IDR')
+
+# merge DEtables with information about if the genes are targeted by lin-53 or not
+DE_chip_tables <- lapply(DEtables, function(de) {
+  df <- data.frame(de)
+  rownames(df) <- df$rn
+  df$rn <- NULL
+  df <- merge(df, subset(peak2geneMatrix, select = chipSamples), by = 'row.names')
+  rownames(df) <- df$Row.names 
+  df$Row.names <- NULL
+  return(df)
+})
+```
+
+
+## GO terms enriched for lin-53 targets {.tabset}
+
+### Differentially expressed targets of lin-53
+Using Chip sample L4_YA_IDR and RNAseq for lin_n3368
+```{r}
+de <- DE_chip_tables$lin_n3368
+go_targets <- runGprofiler(rownames(de[de$L4_YA_IDR == 1 & de$status != 'unchanged',]))
+DT::datatable(go_targets[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+### Up-regulated targets of lin-53 
+Using Chip sample L4_YA_IDR and RNAseq for lin_n3368
+```{r}
+de <- DE_chip_tables$lin_n3368
+go_upregulated_targets <- runGprofiler(rownames(de[de$L4_YA_IDR == 1 & de$status == 'upregulated',]))
+DT::datatable(go_upregulated_targets[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+### Down-regulated targets of lin-53 
+Using Chip sample L4_YA_IDR and RNAseq for lin_n3368
+```{r}
+de <- DE_chip_tables$lin_n3368
+go_downregulated_targets <- runGprofiler(rownames(de[de$L4_YA_IDR == 1 & de$status == 'downregulated',]))
+DT::datatable(go_downregulated_targets[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+```
+
+## Heatmap of differentially expressed genes in Metabolic Pathways (KEGG) {.tabset}
+
+```{r}
+#getmetabolic genes 
+metabolic_genes <- readLines('./data/genesets/metabolic_pathways_genes.kegg.txt')
+
+```
+
+### lin_n3368
+
+```{r}
+diff_metabolic_genes <- intersect(metabolic_genes, 
+                                  DEgenes$lin_n3368)
+
+#find expression matrix for the selected genes 
+M <-  subset(expr[diff_metabolic_genes,], 
+            select = c(rownames(colData[colData$sample_type %in% c('WT', 'lin_n3368'),])))
+
+#remove zero-rows
+M <- M[rowSums(M) > 0,]
+
+#define row annotation
+# annotate genes as lin-53 targets or not
+anno_row <- subset(DE_chip_tables$lin_n3368[rownames(M),], 
+                                    select = c('L4_YA_IDR'))
+anno_row <- data.frame(ifelse(anno_row == 1, 'Target', 'Non-target'))
+
+anno_row$log2foldChange <- DE_chip_tables$lin_n3368[rownames(M),]$log2FoldChange
+
+plotHeatmap(log2(M+1), top = nrow(M), annoDf = colData[,c('batch', 'sample_type')], 
+            title = 'Metabolic pathway genes differential in lin-53 mutants versus WT', 
+            scaleBy = 'row', showRownames = TRUE, cutree_cols = 2, cutree_rows = 2, fontsize_row = 4, 
+            fontsize = 6,
+            annotation_row = anno_row, 
+            annotation_colors = list("log2foldChange" = c('blue', 'white', 'red'))) 
+
+plotHeatmap(log2(M+1), top = nrow(M), annoDf = colData[,c('batch', 'sample_type')], 
+            title = 'Metabolic pathway genes differential in lin-53 mutants versus WT', 
+            scaleBy = 'row', showRownames = TRUE, cutree_cols = 2, cutree_rows = 2, fontsize_row = 4, 
+            fontsize = 6,
+            annotation_row = anno_row, 
+            annotation_colors = list("log2foldChange" = c('blue', 'white', 'red')),
+            filename = file.path(outdir, "heatmap.metabolic_pathways_differential_genes.lin53_vs_WT.pdf")) 
+```
+
+### sin3
+
+```{r}
+diff_metabolic_genes <- intersect(metabolic_genes, 
+                                  DEgenes$sin3)
+
+#find expression matrix for the selected genes 
+M <-  subset(expr[diff_metabolic_genes,], 
+            select = c(rownames(colData[colData$sample_type %in% c('WT', 'sin3'),])))
+
+#remove zero-rows
+M <- M[rowSums(M) > 0,]
+
+#define row annotation
+# annotate genes as lin-53 targets or not
+anno_row <- subset(DE_chip_tables$sin3[rownames(M),], 
+                                    select = c('L4_YA_IDR'))
+anno_row <- data.frame(apply(anno_row, 2, as.factor))
+
+plotHeatmap(log2(M+1), top = nrow(M), annoDf = colData[,c('batch', 'sample_type')], 
+            title = 'Metabolic pathway genes differential in sin-3 mutants versus WT', 
+            scaleBy = 'row', showRownames = TRUE, cutree_cols = 2, cutree_rows = 2, fontsize_row = 6, 
+            fontsize = 6,
+            annotation_row = anno_row) 
+
+plotHeatmap(log2(M+1), top = nrow(M), annoDf = colData[,c('batch', 'sample_type')], 
+            title = 'Metabolic pathway genes differential in sin-3  mutants versus WT', 
+            scaleBy = 'row', showRownames = TRUE, cutree_cols = 2, cutree_rows = 2, fontsize_row = 6, 
+            fontsize = 6,
+            annotation_row = anno_row, 
+            annotation_colors = list("log2foldChange" = c('blue', 'white', 'red')),
+            filename = file.path(outdir, "heatmap.metabolic_pathways_differential_genes.sin3_vs_WT.pdf")) 
+```
+
+
+## Muscle genes 
+
+###  lin-53 vs WT
+
+```{r, out.width=800, out.height=1000}
+
+#define row annotation
+# annotate genes as lin-53 targets or not
+
+p <- plotGeneSetHeatmap(geneSetFile = './data/genesets/muscle_genes.txt', 
+                   expr = expr, colData = colData, 
+                   sample_types = c('WT', 'lin_n3368'), 
+                   plotTitle = 'Muscle Genes lin53 vs WT', outdir = outdir, fontsize_row = 4, 
+                   annotation_row = data.frame('status' = DE_chip_tables$lin_n3368$status, 
+                                               'targeted_by_lin53' = as.factor(DE_chip_tables$lin_n3368$L4_YA_IDR), 
+                                               row.names = rownames(DE_chip_tables$lin_n3368)))
+knitr::include_graphics(path = p)
+```
+
+### sin3 vs WT
+
+```{r, out.width=800, out.height=1000}
+p <- plotGeneSetHeatmap(geneSetFile = './data/genesets/muscle_genes.txt', 
+                   expr = expr, colData = colData, 
+                   sample_types = c('WT', 'sin3'), 
+                   plotTitle = 'Muscle Genes sin3 vs WT', outdir = outdir, fontsize_row = 4, 
+                   annotation_row = data.frame('status' = DE_chip_tables$sin3$status, 
+                                               'targeted_by_lin53' = as.factor(DE_chip_tables$sin3$L4_YA_IDR), 
+                                               row.names = rownames(DE_chip_tables$sin3)))
+knitr::include_graphics(path = p)
+```
+
+
+## Aging&Stress related genes 
+
+###  lin-53 vs WT
+
+```{r, out.width=800, out.height=1000}
+
+#define row annotation
+# annotate genes as lin-53 targets or not
+
+p <- plotGeneSetHeatmap(geneSetFile = './data/genesets/aging_and_stress.txt', 
+                   expr = expr, colData = colData, 
+                   sample_types = c('WT', 'lin_n3368'), 
+                   plotTitle = 'Aging&Stress genes: lin53 vs WT', outdir = outdir, fontsize_row = 4, 
+                   annotation_row = data.frame('status' = DE_chip_tables$lin_n3368$status, 
+                                               'targeted_by_lin53' = as.factor(DE_chip_tables$lin_n3368$L4_YA_IDR), 
+                                               row.names = rownames(DE_chip_tables$lin_n3368)))
+knitr::include_graphics(path = p)
+```
+
+### sin3 vs WT
+
+```{r, out.width=800, out.height=1000}
+p <- plotGeneSetHeatmap(geneSetFile = './data/genesets/aging_and_stress.txt', 
+                   expr = expr, colData = colData, 
+                   sample_types = c('WT', 'sin3'), 
+                   plotTitle = 'Aging&Stress genes: sin3 vs WT', outdir = outdir, fontsize_row = 4, 
+                   annotation_row = data.frame('status' = DE_chip_tables$sin3$status, 
+                                               'targeted_by_lin53' = as.factor(DE_chip_tables$sin3$L4_YA_IDR), 
+                                               row.names = rownames(DE_chip_tables$sin3)))
+knitr::include_graphics(path = p)
+```
+
+# Expression distribution of Lin-53 targets in Lin-53 mutants {.tabset}
+
+lin-53 targets seem to be enriched among highly expressed genes. 
+
+## MA plot
+
+```{r}
+de <- DE_chip_tables$lin_n3368
+mde <- reshape2::melt(de, measure.vars = chipSamples) 
+mde$value <- as.factor(ifelse(mde$value == 1, "YES", "NO"))
+ma_plot <- ggplot2::ggplot(mde, aes(x = log10(baseMean), y = log2FoldChange)) + 
+  geom_point(aes(color = value), alpha = 0.1) + facet_grid(~ variable) + 
+  guides(color = guide_legend(title = 'LIN-53 target')) +
+  scale_color_brewer(palette = 'Dark2')
+print(ma_plot)
+```
+
+## Boxplot
+```{r}
+box_plot <- ggplot2::ggplot(mde, aes(x = value, y = log10(baseMean))) + 
+  geom_boxplot(aes(fill = value)) + facet_grid(~ variable) + 
+  labs(x =  '') + 
+  guides(fill = guide_legend(title = 'LIN-53 target')) +
+  scale_fill_brewer(palette = 'Dark2') + coord_flip()
+print(box_plot)
+```
+
+```{r}
+pdf("Expression_distribution_lin53_targets.pdf")
+cowplot::plot_grid(ma_plot, box_plot, labels = "AUTO", nrow = 2)
+dev.off()
+```
+
+# Session Information
+```{r}
+print(sessionInfo())
+```
+
+
+
