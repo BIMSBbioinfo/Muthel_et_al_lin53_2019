@@ -35,6 +35,17 @@ This is a list of gene sets compiled either manually or using scripts. The metab
 
 ./makeManuscriptFigures.Rmd : takes as input ChIPseq peaks and RNA-seq read counts and produces some figures and an html report. 
 
+To render the vignette type:
+
+> Rscript ./render.vignette.R
+
+# Results
+
+./results folder contains two HTML reports. 
+
+- `manuscript_analysis.html` contains the figures and tables as used for the manuscript using log2FoldChange threshold of 0.5 and FDR threshold of 0.05. 
+- `manuscript_analysis.stricter_thresholds.html` contains the same analysis using stricter log2FoldChange (1) and FDR (0.001) thresholds. 
+
 
 ## Required R packages for running the vignette
 
@@ -47,9 +58,7 @@ This is a list of gene sets compiled either manually or using scripts. The metab
 
 > BiocManager::install(c('RUVSeq', 'DESeq2', 'GenomicFeatures'))
 
-To render the vignette type:
 
-> Rscript ./render.vignette.R
 
 
 
