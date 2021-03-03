@@ -44,7 +44,7 @@ suppressMessages(suppressWarnings(library(ggplot2)))
 suppressMessages(suppressWarnings(library(ggrepel)))
 suppressMessages(suppressWarnings(library(ggfortify)))
 suppressMessages(suppressWarnings(library(VennDiagram)))
-suppressMessages(suppressWarnings(library(gProfileR)))
+suppressMessages(suppressWarnings(library(gprofiler2)))
 suppressMessages(suppressWarnings(library(UpSetR)))
 suppressMessages(suppressWarnings(library(DT)))
 suppressMessages(suppressWarnings(library(reshape2)))
@@ -153,12 +153,12 @@ importNarrowPeaks <- function(filePath) {
 dds <- DESeqDataSetFromMatrix(countData = countData, colData = colData, design = ~ sample_type)
 dds <- dds[rowSums(counts(dds)) > 1,]
 dds <- DESeq(dds)
-plotRLE(counts(dds, normalized = TRUE), outline=FALSE, ylim=c(-4, 4), col=colData$sample_type, main = 'DESeq normalized')
+plotRLE(counts(dds, normalized = TRUE), outline=FALSE, ylim=c(-4, 4), col=as.factor(colData$sample_type), main = 'DESeq normalized')
 ```
 
 #### PCA
 ```{r}
-plotPCA(counts(dds, normalized = TRUE), col=as.numeric(colData$sample_type), cex=1.2, main = 'DESeq normalized')
+plotPCA(counts(dds, normalized = TRUE), col=as.numeric(as.factor(colData$sample_type)), cex=1.2, main = 'DESeq normalized')
 ```
 
 #### Heatmap
@@ -187,12 +187,12 @@ differences <- makeGroups(colData$sample_type)
 ## looking for three different sources of unwanted variation (k = 3)
 set_s <- RUVs(set, unique(rownames(set)), k=3, differences) #all genes
 
-plotRLE(set_s, outline=FALSE, ylim=c(-4, 4), col=colData$sample_type, main = 'After processing with RUVs')
+plotRLE(set_s, outline=FALSE, ylim=c(-4, 4), col=as.factor(colData$sample_type), main = 'After processing with RUVs')
 ```
 
 #### PCA
 ```{r}
-plotPCA(set_s, col=as.numeric(colData$sample_type), cex=1.2, main = 'After processing with RUVs')
+plotPCA(set_s, col=as.numeric(as.factor(colData$sample_type)), cex=1.2, main = 'After processing with RUVs')
 ```
 
 #### Heatmap
@@ -224,8 +224,15 @@ DE <- lapply(sampleGroups[which(sampleGroups != 'WT')], function(s) {
                                        contrast = c('sample_type', s, 'WT'), 
                                        lfcThreshold = log2FC_cutoff, 
                                        alpha = FDR_cutoff))
+  res <- res[order(res$padj),]
+  return(res)
 })
 names(DE) <- sampleGroups[which(sampleGroups != 'WT')]
+
+# print DE results to files
+lapply(names(DE), function(x) {
+  write.table(DE[[x]], file = file.path(outdir, paste0(x, '_vs_WT.deseq2.results.tsv')), quote = F, sep = '\t')
+})
 
 # given a DESeq2 results table, classify each gene as unchanged or up/down regulated 
 getDifferentialExpressionStatus <- function(de, fdr_thr, log2fc_thr) {
@@ -258,20 +265,18 @@ Let's define some functions for downstream analysis
 getGeneSetExpr <- function(M, geneSetFile) {
   genes <- readLines(geneSetFile)
   #convert to latest ENSG gene ids
-  genes <- unique(gProfileR::gconvert(genes, 'celegans', 'ENSG')$name)
-  return(M[intersect(genes, rownames(M)),])
+  genes <- toupper(unique(gprofiler2::gconvert(genes, 'celegans', 'ENSG')$name))
+  return(M[intersect(genes, toupper(rownames(M))),])
 }
 
 runGprofiler <- function(genes, 
                          organism = 'celegans',
                          src_filter = c('GO', 'REAC', 'KEGG'), 
-                         hier_filtering = 'none',
                          ...) {
-  res <- data.table::data.table(gProfileR::gprofiler(query = genes, organism = organism, 
-                              src_filter = src_filter, 
-                              hier_filtering = hier_filtering, ...))
-  res <- res[order(p.value), ]
-  return(res)
+  res <- data.table(gprofiler2::gost(query = genes, organism = organism, 
+                              sources = src_filter, 
+                              ...)[['result']])
+  return(res[order(p_value)])
 }
 
 plotGeneExpression <- function(gene, countMatrix, colData) {
@@ -328,20 +333,21 @@ expr <- normCounts(set_s)
 ##### Differentially expressed genes
 
 ```{r}
+fields_to_display <- c('p_value', 'term_name', 'source', 'term_size', 'intersection_size')
 go_lin_CRISPR <- runGprofiler(genes = DEtables$lin_CRISPR[status != 'unchanged']$rn)
-DT::datatable(go_lin_CRISPR[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_lin_CRISPR, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Up-regulated  
 ```{r}
 go_lin_CRISPR_up <- runGprofiler(genes = DEtables$lin_CRISPR[status == 'upregulated']$rn)
-DT::datatable(go_lin_CRISPR_up[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_lin_CRISPR_up, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Down-regulated  
 ```{r}
 go_lin_CRISPR_down <- runGprofiler(genes = DEtables$lin_CRISPR[status == 'downregulated']$rn)
-DT::datatable(go_lin_CRISPR_down[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_lin_CRISPR_down, select = fields_to_display), filter = 'bottom')
 ```
 
 #### lin_n3368 {.tabset .tabset-pills}
@@ -350,21 +356,21 @@ DT::datatable(go_lin_CRISPR_down[,c('p.value', 'term.name', 'domain', 'term.size
 
 ```{r}
 go_lin_n3368 <- runGprofiler(genes = DEtables$lin_n3368[status != 'unchanged']$rn)
-DT::datatable(go_lin_n3368[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_lin_n3368, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Up-regulated
 
 ```{r}
 go_lin_n3368_up <- runGprofiler(genes = DEtables$lin_n3368[status == 'upregulated']$rn)
-DT::datatable(go_lin_n3368_up[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_lin_n3368_up, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Down-regulated
 
 ```{r}
 go_lin_n3368_down <- runGprofiler(genes = DEtables$lin_n3368[status == 'downregulated']$rn)
-DT::datatable(go_lin_n3368_down[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_lin_n3368_down, select = fields_to_display), filter = 'bottom')
 ```
 
 #### sin-3 {.tabset .tabset-pills}
@@ -373,21 +379,21 @@ DT::datatable(go_lin_n3368_down[,c('p.value', 'term.name', 'domain', 'term.size'
 
 ```{r}
 go_sin3 <- runGprofiler(DEtables$sin3[status != 'unchanged']$rn)
-DT::datatable(go_sin3[, c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_sin3, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Up-regulated
 
 ```{r}
 go_sin3_up <- runGprofiler(DEtables$sin3[status == 'upregulated']$rn)
-DT::datatable(go_sin3_up[, c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_sin3_up, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Down-regulated
 
 ```{r}
 go_sin3_down <- runGprofiler(DEtables$sin3[status == 'downregulated']$rn)
-DT::datatable(go_sin3_down[, c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_sin3_down, select = fields_to_display), filter = 'bottom')
 ```
 
 
@@ -397,20 +403,20 @@ DT::datatable(go_sin3_down[, c('p.value', 'term.name', 'domain', 'term.size', 'o
 
 ```{r}
 go_let418 <- runGprofiler(DEtables$let418[status != 'unchanged']$rn)
-DT::datatable(go_let418[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_let418, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Up-regulated
 
 ```{r}
 go_let418_up <- runGprofiler(DEtables$let418[status == 'upregulated']$rn)
-DT::datatable(go_let418_up[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_let418_up, select = fields_to_display), filter = 'bottom')
 ```
 
 ##### Down-regulated
 ```{r}
 go_let418_down <- runGprofiler(DEtables$let418[status == 'downregulated']$rn)
-DT::datatable(go_let418_down[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_let418_down, select = fields_to_display), filter = 'bottom')
 ```
 
 
@@ -783,7 +789,7 @@ Using Chip sample L4_YA_IDR and RNAseq for lin_n3368
 ```{r}
 de <- DE_chip_tables$lin_n3368
 go_targets <- runGprofiler(rownames(de[de$L4_YA_IDR == 1 & de$status != 'unchanged',]))
-DT::datatable(go_targets[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_targets, select = fields_to_display), filter = 'bottom')
 ```
 
 ### Up-regulated targets of lin-53 
@@ -791,7 +797,7 @@ Using Chip sample L4_YA_IDR and RNAseq for lin_n3368
 ```{r}
 de <- DE_chip_tables$lin_n3368
 go_upregulated_targets <- runGprofiler(rownames(de[de$L4_YA_IDR == 1 & de$status == 'upregulated',]))
-DT::datatable(go_upregulated_targets[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_upregulated_targets, select = fields_to_display), filter = 'bottom')
 ```
 
 ### Down-regulated targets of lin-53 
@@ -799,7 +805,7 @@ Using Chip sample L4_YA_IDR and RNAseq for lin_n3368
 ```{r}
 de <- DE_chip_tables$lin_n3368
 go_downregulated_targets <- runGprofiler(rownames(de[de$L4_YA_IDR == 1 & de$status == 'downregulated',]))
-DT::datatable(go_downregulated_targets[,c('p.value', 'term.name', 'domain', 'term.size', 'overlap.size')], filter = 'bottom')
+DT::datatable(subset(go_downregulated_targets, select = fields_to_display), filter = 'bottom')
 ```
 
 ## Heatmap of differentially expressed genes in Metabolic Pathways (KEGG) {.tabset}
@@ -975,7 +981,7 @@ print(box_plot)
 ```
 
 ```{r}
-pdf("Expression_distribution_lin53_targets.pdf")
+pdf(file = file.path(outdir, "Expression_distribution_lin53_targets.pdf"))
 cowplot::plot_grid(ma_plot, box_plot, labels = "AUTO", nrow = 2)
 dev.off()
 ```

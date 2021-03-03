@@ -41,17 +41,19 @@ To render the vignette type:
 
 # Results
 
-./results folder contains two HTML reports. 
+./results.2019.05.09 folder points to the results obtained at the time of the publication of the study. 
 
+The folder contains two HTML reports: 
 - `manuscript_analysis.html` contains the figures and tables as used for the manuscript using log2FoldChange threshold of 0.5 and FDR threshold of 0.05. 
 - `manuscript_analysis.stricter_thresholds.html` contains the same analysis using stricter log2FoldChange (1) and FDR (0.001) thresholds. 
 
+Other folders starting with `results` followed by a date correspond to reanalysis of the same input on different dates because of for instance bug fixes due to package updates. 
 
 ## Required R packages for running the vignette
 
 ### CRAN packages
 
-> install.packages(c('ggplot2', 'ggfortify', 'VennDiagram', 'gProfileR', 'UpSetR', 'DT', 'reshape2', 'data.table', 'scales', 'corrplot'))
+> install.packages(c('ggplot2', 'ggfortify', 'VennDiagram', 'gprofiler2', 'UpSetR', 'DT', 'reshape2', 'data.table', 'scales', 'corrplot'))
 
 
 ### Bioconductor packages 
